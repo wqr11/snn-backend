@@ -5,7 +5,7 @@ import uvicorn
 from datetime import datetime, timedelta
 from typing import Union, Optional
 from uuid import uuid4
-from fastapi import FastAPI, HTTPException, Depends, Cookie, Response, Header, status, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, Depends, Cookie, Response, Header, status, UploadFile, File, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
 import sqlalchemy
 from BaseModel.PostBase import PostBase
@@ -55,9 +55,6 @@ AUTH_TOKEN = "abcdef123456"  # Same token as in nginx config
 
 UPLOAD_DIR = Path("/var/www/static-files")
 AUTH_TOKEN = "abcdef123456"
-
-
-
 
 
 async def save_refresh_token(user_id: str, token: str):
@@ -133,6 +130,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 PUBLIC_DIR = Path("public")
 PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
+
 
 async def save_file_locally(file: UploadFile) -> str:
     """
@@ -320,13 +318,13 @@ async def logout(request: Request):
 
 @app.patch("/update_user")
 async def update_user(
-    request: Request,
-    email: str = Form(None),
-    previous_password: str = Form(...),
-    password: str = Form(None),
-    description: str = Form(None),
-    avatar: UploadFile = File(None),
-    db_sess: Session = Depends(get_db)
+        request: Request,
+        email: str = Form(None),
+        previous_password: str = Form(...),
+        password: str = Form(None),
+        description: str = Form(None),
+        avatar: UploadFile = File(None),
+        db_sess: Session = Depends(get_db)
 ):
     token = request.cookies.get("access_token")
 
@@ -434,6 +432,77 @@ async def create_post(
         "attachment_url": attachment_url
     }
 
+
+@app.get("/posts")
+def get_posts(
+        offset: int = Query(0, ge=0),
+        limit: int = Query(10, le=50),
+        db_sess: Session = Depends(get_db)
+):
+    """
+    Возвращает ленту постов с ленивой загрузкой (pagination)
+    """
+    posts = (
+        db_sess.query(Posts)
+        .order_by(Posts.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+    # Чтобы сразу вернуть и вложения
+    result = []
+    for post in posts:
+        result.append({
+            "id": post.id,
+            "title": post.title,
+            "content": post.content,
+            "created_at": post.created_at,
+            "owner_id": post.owner_id,
+            "attachments": [
+                {"id": a.id, "file_url": a.file_url} for a in post.attachments
+            ]
+        })
+
+    return {"posts": result, "next_offset": offset + len(result)}
+
+
+@app.get("/posts/{user_id}")
+def get_posts(
+        user_id: str,
+        db_sess: Session = Depends(get_db),
+        offset: int = Query(0, ge=0),
+        limit: int = Query(10, le=50),
+):
+    """
+    Возвращает посты с ленивой загрузкой (пагинация) и возможностью фильтрации по пользователю.
+    """
+    query = db_sess.query(Posts).order_by(Posts.created_at.desc())
+
+    # 🔹 Если указан user_id — фильтруем только его посты
+    if user_id:
+        query = query.filter(Posts.owner_id == user_id)
+
+    posts = query.offset(offset).limit(limit).all()
+
+    result = []
+    for post in posts:
+        result.append({
+            "id": post.id,
+            "title": post.title,
+            "content": post.content,
+            "created_at": post.created_at,
+            "owner_id": post.owner_id,
+            "attachments": [
+                {"id": a.id, "file_url": a.file_url} for a in post.attachments
+            ]
+        })
+
+    return {
+        "posts": result,
+        "next_offset": offset + len(result),
+        "has_more": len(posts) == limit  # 👈 фронт может использовать это для проверки
+    }
 
 
 if __name__ == "__main__":
