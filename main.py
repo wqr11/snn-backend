@@ -30,6 +30,10 @@ from models.Posts import Posts
 from models.attachments import Attachment
 from pathlib import Path
 import shutil
+from models.db_session import SqlAlchemyBase
+
+target_metadata = SqlAlchemyBase.metadata
+
 
 
 def get_db():
@@ -148,25 +152,49 @@ async def save_file_locally(file: UploadFile) -> str:
 
 
 @app.post("/register", response_model=UserRead)
-async def reg_user(item: UsersBase, db_sess: Session = Depends(get_db)):
+async def reg_user(
+        item: UsersBase,
+        db_sess: Session = Depends(get_db)
+):
+    # Проверка на существующий email
     if db_sess.query(Users).filter(Users.email == item.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
+
+    # Генерация нового пользователя
     try:
+        user_id = str(uuid4())
+
+        # Общие поля для всех пользователей
         new_user = Users(
-            id=str(uuid4()),
-            description=item.description,
+            id=user_id,
             email=item.email,
             password=hashed_password(item.password),
-            avatar_url=item.avatar_url,
-            is_group=item.is_group
+            description=item.description,
+            is_group=item.is_group,
         )
+
+        # Дополнительные поля в зависимости от типа
+        if item.is_group:
+            new_user.company_name = item.company_name
+            new_user.main_tag = item.main_tag  # основной тег для компании
+            new_user.additional_tags = item.additional_tags
+            new_user.subscriber_count = 0  # начальное количество подписчиков
+        else:
+            new_user.name = item.name
+            new_user.age = item.age
+            new_user.main_tag = item.main_tag  # должность
+            new_user.additional_tags = item.additional_tags
+            new_user.subscriptions_count = 0  # начальное количество подписок
+
         db_sess.add(new_user)
         db_sess.commit()
         db_sess.refresh(new_user)
+
     except sqlalchemy.exc.StatementError:
         raise HTTPException(status_code=400, detail='Bad request')
-    else:
-        return new_user
+
+    return new_user
+
 
 
 @app.post("/login")
@@ -319,45 +347,79 @@ async def logout(request: Request):
 @app.patch("/update_user")
 async def update_user(
         request: Request,
-        email: str = Form(None),
         previous_password: str = Form(...),
+        email: str = Form(None),
         password: str = Form(None),
         description: str = Form(None),
+        main_tag: str = Form(None),
+        additional_tags: str = Form(None),
+        name: str = Form(None),
+        age: int = Form(None),
+        company_name: str = Form(None),
         avatar: UploadFile = File(None),
         db_sess: Session = Depends(get_db)
 ):
+    # 🔑 Получаем access_token
     token = request.cookies.get("access_token")
-
     if not token:
         raise HTTPException(status_code=401, detail="No token provided")
 
-    # Получаем id пользователя из токена
     user_id = get_user_id_from_token(token)
 
-    # Достаём пользователя из базы
+    # 🔍 Ищем пользователя
     db_user = db_sess.query(Users).filter(Users.id == user_id).first()
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Проверяем предыдущий пароль
+    # 🔐 Проверяем предыдущий пароль
     if not verify_password(previous_password, db_user.password):
         raise HTTPException(status_code=400, detail="Incorrect previous password")
 
-    # Обновляем только переданные поля
+    # 🧩 Обновляем данные
     if email:
         db_user.email = email
     if password:
         db_user.password = hashed_password(password)
     if description:
         db_user.description = description
+    if main_tag:
+        db_user.main_tag = main_tag
+    if additional_tags:
+        db_user.additional_tags = additional_tags
+
+    # 👤 Если обычный пользователь
+    if not db_user.is_group:
+        if name:
+            db_user.name = name
+        if age:
+            db_user.age = age
+
+    # 🏢 Если компания (группа)
+    else:
+        if company_name:
+            db_user.company_name = company_name
+
+    # 🖼️ Обновление аватара
     if avatar:
         avatar_url = await save_file_locally(avatar)
         db_user.avatar_url = avatar_url
 
+    # 💾 Сохраняем изменения
     db_sess.commit()
     db_sess.refresh(db_user)
 
-    return db_user
+    return {
+        "id": db_user.id,
+        "email": db_user.email,
+        "is_group": db_user.is_group,
+        "description": db_user.description,
+        "main_tag": db_user.main_tag,
+        "additional_tags": db_user.additional_tags,
+        "avatar_url": db_user.avatar_url,
+        "company_name": db_user.company_name if db_user.is_group else None,
+        "name": db_user.name if not db_user.is_group else None,
+        "age": db_user.age if not db_user.is_group else None
+    }
 
 
 @app.get("/users")
