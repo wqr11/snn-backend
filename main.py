@@ -712,6 +712,7 @@ def get_posts(
         "has_more": len(posts) == limit  # 👈 фронт может использовать это для проверки
     }
 
+from sqlalchemy import or_, func
 
 @app.get("/search/users")
 def search_users(
@@ -726,9 +727,9 @@ def search_users(
     query = db_sess.query(Users).filter(
         or_(
             Users.main_tag.ilike(f"%{tag}%"),
-            Users.additional_tags.ilike(f"%{tag}%")
+            func.array_to_string(Users.additional_tags, ',').ilike(f"%{tag}%")
         )
-    ).order_by(Users.is_group.desc())  # можно сортировать по типу
+    ).order_by(Users.is_group.desc())
 
     users = query.offset(offset).limit(limit).all()
 
@@ -752,6 +753,7 @@ def search_users(
         "next_offset": offset + len(result),
         "has_more": len(users) == limit
     }
+
 
 
 if __name__ == "__main__":
