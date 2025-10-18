@@ -351,7 +351,7 @@ async def update_user(
         name: str = Form(None),
         age: int = Form(None),
         company_name: str = Form(None),
-        avatar: UploadFile = File(None),
+        avatar: UploadFile | None = File(None),
         db_sess: Session = Depends(get_db)
 ):
     auth_header = request.headers.get("Authorization")
@@ -389,10 +389,8 @@ async def update_user(
     else:
         if company_name:
             db_user.company_name = company_name
-
     if avatar:
         avatar_url = await save_file_locally(avatar)
-        print(avatar)
         db_user.avatar_url = avatar_url
 
     db_sess.commit()
@@ -431,6 +429,7 @@ def group_subscribers(group_id: str, db_sess: Session = Depends(get_db)):
         })
 
     return result
+
 
 
 @app.get("/my-subscriptions")
