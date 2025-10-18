@@ -96,12 +96,14 @@ def get_user_id_from_token(token: str) -> str:
         )
 
 
+# <CHANGE> Fixed CORS configuration for mobile app support
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # адрес React
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=["*"],  # For development. In production, specify exact origins
+    allow_credentials=False,  # Set to False when using "*" for origins
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 
@@ -214,7 +216,7 @@ async def login_user(user: UserLogin, response: Response, db_sess: Session = Dep
     # 3️⃣ Сохраняем refresh-токен в Redis
     await save_refresh_token(db_user.id, refresh_token)
 
-    # 4️⃣ Устанавливаем refresh-токен в cookie
+    # 4️⃣ Устанавливаем refresh-токен в cookie (для веб-клиентов)
     response.set_cookie(
         key="refresh_token",
         value=refresh_token,
@@ -224,7 +226,7 @@ async def login_user(user: UserLogin, response: Response, db_sess: Session = Dep
         max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600,
     )
 
-    # 5️⃣ Устанавливаем access-токен в cookie
+    # 5️⃣ Устанавливаем access-токен в cookie (для веб-клиентов)
     response.set_cookie(
         key="access_token",
         value=access_token,
@@ -234,17 +236,26 @@ async def login_user(user: UserLogin, response: Response, db_sess: Session = Dep
         max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,  # срок жизни access-токена
     )
 
-    # 6️⃣ Возвращаем токены в теле запроса тоже
+    # <CHANGE> Return both tokens in response body for mobile apps
+    # 6️⃣ Возвращаем оба токена в теле запроса (для мобильных приложений)
     return {
         "access_token": access_token,
+        "refresh_token": refresh_token,
         "token_type": "bearer"
     }
 
 
 @app.post("/refresh")
-async def refresh_token(request: Request, response: Response):
-    # Получаем токен из cookies
+async def refresh_token(request: Request, response: Response, authorization: Optional[str] = Header(None)):
+    # <CHANGE> Support both cookie and Authorization header for refresh token
+    # Получаем токен из cookies или Authorization header
     refresh_token = request.cookies.get("refresh_token")
+    
+    # Если токена нет в cookies, проверяем Authorization header
+    if not refresh_token and authorization:
+        if authorization.startswith("Bearer "):
+            refresh_token = authorization.replace("Bearer ", "")
+    
     if not refresh_token:
         raise HTTPException(status_code=401, detail="Missing refresh token")
 
@@ -272,7 +283,7 @@ async def refresh_token(request: Request, response: Response):
     new_refresh_token = create_refresh_token({"sub": user_id}, db_sess=None)
     await save_refresh_token(user_id, new_refresh_token)
 
-    # Перезаписываем cookie
+    # Перезаписываем cookie (для веб-клиентов)
     response.set_cookie(
         key="refresh_token",
         value=new_refresh_token,
@@ -291,16 +302,28 @@ async def refresh_token(request: Request, response: Response):
         max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,  # срок жизни access-токена
     )
 
-    return {"access_token": new_access_token}
+    # <CHANGE> Return both tokens for mobile apps
+    return {
+        "access_token": new_access_token,
+        "refresh_token": new_refresh_token,
+        "token_type": "bearer"
+    }
 
 
+# <CHANGE> Updated middleware to support both cookie and Authorization header authentication
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     """
-    Middleware для проверки access_token только из cookies.
+    Middleware для проверки access_token из cookies или Authorization header.
     """
     # Пытаемся достать токен из cookies
     token = request.cookies.get("access_token")
+    
+    # Если токена нет в cookies, проверяем Authorization header
+    if not token:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.replace("Bearer ", "")
 
     # Если токена нет — продолжаем без авторизации
     if not token:
@@ -329,9 +352,14 @@ async def auth_middleware(request: Request, call_next):
 
 
 @app.post("/logout", response_model=None)
-async def logout(request: Request):
-    # Получаем токен только из cookies
+async def logout(request: Request, authorization: Optional[str] = Header(None)):
+    # <CHANGE> Support both cookie and Authorization header for logout
+    # Получаем токен из cookies или Authorization header
     token = request.cookies.get("access_token")
+    
+    if not token and authorization:
+        if authorization.startswith("Bearer "):
+            token = authorization.replace("Bearer ", "")
 
     if not token:
         raise HTTPException(status_code=401, detail="No token provided")
@@ -358,10 +386,17 @@ async def update_user(
         age: int = Form(None),
         company_name: str = Form(None),
         avatar: UploadFile = File(None),
+        authorization: Optional[str] = Header(None),
         db_sess: Session = Depends(get_db)
 ):
-    # 🔑 Получаем access_token
+    # <CHANGE> Support both cookie and Authorization header
+    # 🔑 Получаем access_token из cookies или Authorization header
     token = request.cookies.get("access_token")
+    
+    if not token and authorization:
+        if authorization.startswith("Bearer "):
+            token = authorization.replace("Bearer ", "")
+    
     if not token:
         raise HTTPException(status_code=401, detail="No token provided")
 
@@ -429,9 +464,14 @@ def get_users(db_sess: Session = Depends(get_db)):
 
 
 @app.delete("/delete_user")
-def delete_user(request: Request, db_sess: Session = Depends(get_db)):
-    # Получаем токен только из cookies
+def delete_user(request: Request, authorization: Optional[str] = Header(None), db_sess: Session = Depends(get_db)):
+    # <CHANGE> Support both cookie and Authorization header
+    # Получаем токен из cookies или Authorization header
     token = request.cookies.get("access_token")
+    
+    if not token and authorization:
+        if authorization.startswith("Bearer "):
+            token = authorization.replace("Bearer ", "")
 
     if not token:
         raise HTTPException(status_code=401, detail="No token provided")
@@ -454,7 +494,7 @@ async def create_post(
         file: UploadFile = File(None),
         db_sess: Session = Depends(get_db)
 ):
-    # 1️⃣ Проверка авторизации через middleware
+    # 1️⃣ Проверка авторизации через middleware (теперь поддерживает и header, и cookie)
     user_id = request.state.user
     if not user_id:
         raise HTTPException(status_code=401, detail="No token provided")
