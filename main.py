@@ -47,6 +47,13 @@ def get_db():
 
 
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # адрес React
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 global_init()
 SECRET_KEY = "supersecretkey"  # ⚠️ вынеси в .env
 ALGORITHM = "HS256"
@@ -94,16 +101,6 @@ def get_user_id_from_token_header(authorization: str) -> str:
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-
-# <CHANGE> Fixed CORS configuration for mobile app support
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # адрес React
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-)
 
 
 # генерация JWT
@@ -285,6 +282,14 @@ async def auth_middleware(request: Request, call_next):
         return JSONResponse(status_code=401, content={"detail": "Invalid or expired access token"})
 
     return await call_next(request)
+
+@app.middleware("http")
+async def add_cors_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+    return response
 
 
 @app.get("/me")
