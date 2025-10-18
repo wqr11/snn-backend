@@ -9,7 +9,7 @@ class UsersBase(BaseModel):
 
     company_name: Optional[str] = None
     main_tag: Optional[str] = None
-    additional_tags: Optional[List[str]] = None
+    additional_tags: List[str] | None
 
     name: Optional[str] = None
     age: Optional[int] = None
