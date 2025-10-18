@@ -2,13 +2,12 @@ from sqlalchemy import Column, String, Integer, Boolean, CheckConstraint, ARRAY
 from sqlalchemy.orm import relationship
 from models.db_session import SqlAlchemyBase
 
-
-
 class Users(SqlAlchemyBase):
     __tablename__ = "users"
 
     id = Column(String, primary_key=True)
-    email = Column(String, nullable=False, unique=True)
+    email = Column(String, nullable=False, unique=True)  # общий для всех
+    phone = Column(String, nullable=True, unique=True)   # новый общий для всех
     password = Column(String, nullable=False)
     is_group = Column(Boolean, nullable=False, default=False)
 

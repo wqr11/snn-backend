@@ -1,4 +1,5 @@
 from BaseModel.UserUpdateBase import UsersUpdateBase
+from models.PostLike import PostLike
 from models.db_session import global_init
 from models import db_session
 import uvicorn
@@ -354,6 +355,8 @@ def about_me(request: Request, db_sess: Session = Depends(get_db)):
             "additional_tags": db_user.additional_tags,
             "avatar_url": db_user.avatar_url,
             "subscriber_count": db_user.subscriber_count,
+            "phone": db_user.phone,
+            "age": db_user.age
         }
     else:
         return {
@@ -391,69 +394,65 @@ async def logout(request: Request):
 async def update_user(
         request: Request,
         previous_password: str = Form(...),
-        email: str = Form(None),
+        email: str = Form(...),  # обязательно
         password: str = Form(None),
+        phone: str = Form(None),
         description: str = Form(None),
         main_tag: str = Form(None),
-        additional_tags: str = Form(None),
+        additional_tags: str = Form(None),  # например строка с разделителем запятых
         name: str = Form(None),
         age: int = Form(None),
         company_name: str = Form(None),
         avatar: UploadFile = File(None),
         db_sess: Session = Depends(get_db)
 ):
-    # 🔑 Получаем access_token
+    # Получаем user_id из токена
     token = request.cookies.get("access_token")
     if not token:
         raise HTTPException(status_code=401, detail="No token provided")
-
     user_id = get_user_id_from_token(token)
 
-    # 🔍 Ищем пользователя
     db_user = db_sess.query(Users).filter(Users.id == user_id).first()
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # 🔐 Проверяем предыдущий пароль
+    # Проверяем предыдущий пароль
     if not verify_password(previous_password, db_user.password):
         raise HTTPException(status_code=400, detail="Incorrect previous password")
 
-    # 🧩 Обновляем данные
-    if email:
-        db_user.email = email
+    # Обновляем поля
+    db_user.email = email  # email обязателен
     if password:
         db_user.password = hashed_password(password)
+    if phone:
+        db_user.phone = phone
     if description:
         db_user.description = description
     if main_tag:
         db_user.main_tag = main_tag
     if additional_tags:
-        db_user.additional_tags = additional_tags
+        db_user.additional_tags = [tag.strip() for tag in additional_tags.split(",")]
 
-    # 👤 Если обычный пользователь
     if not db_user.is_group:
         if name:
             db_user.name = name
         if age:
             db_user.age = age
-
-    # 🏢 Если компания (группа)
     else:
         if company_name:
             db_user.company_name = company_name
 
-    # 🖼️ Обновление аватара
     if avatar:
         avatar_url = await save_file_locally(avatar)
         db_user.avatar_url = avatar_url
 
-    # 💾 Сохраняем изменения
     db_sess.commit()
     db_sess.refresh(db_user)
 
     return {
         "id": db_user.id,
         "email": db_user.email,
+        "phone": db_user.phone,
         "is_group": db_user.is_group,
         "description": db_user.description,
         "main_tag": db_user.main_tag,
@@ -463,7 +462,6 @@ async def update_user(
         "name": db_user.name if not db_user.is_group else None,
         "age": db_user.age if not db_user.is_group else None
     }
-
 
 
 @app.get("/group-subscribers/{group_id}")
@@ -497,7 +495,7 @@ def my_subscriptions(request: Request, db_sess: Session = Depends(get_db)):
     for sub in subscriptions:
         group = db_sess.query(Users).filter(Users.id == sub.group_id).first()
         result.append({
-            "group_id": group.id,
+            "id": group.id,
             "company_name": group.company_name,
             "main_tag": group.main_tag,
             "avatar_url": group.avatar_url
@@ -506,72 +504,55 @@ def my_subscriptions(request: Request, db_sess: Session = Depends(get_db)):
     return result
 
 
-
-@app.delete("/unsubscribe/{group_id}")
-def unsubscribe_group(group_id: str, request: Request, db_sess: Session = Depends(get_db)):
+@app.post("/subscribe/{group_id}/toggle")
+def toggle_subscription(group_id: str, request: Request, db_sess: Session = Depends(get_db)):
     user_id = request.state.user
     if not user_id:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    subscription = db_sess.query(Subscription).filter_by(user_id=user_id, group_id=group_id).first()
-    if not subscription:
-        raise HTTPException(status_code=404, detail="Not subscribed")
-
-    db_sess.delete(subscription)
-    db_sess.commit()
-
-    # Обновляем счётчик подписчиков
-    group = db_sess.query(Users).filter(Users.id == group_id).first()
-    group.subscriber_count = db_sess.query(Subscription).filter_by(group_id=group_id).count()
-    db_sess.commit()
-
-    return {"detail": "Unsubscribed successfully"}
-
-
-@app.post("/subscribe/{group_id}")
-def subscribe_group(group_id: str, request: Request, db_sess: Session = Depends(get_db)):
-    user_id = request.state.user
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-    user = db_sess.query(Users).filter(Users.id == user_id).first()
-    group = db_sess.query(Users).filter(Users.id == group_id, Users.is_group == True).first()
-
-    if not group:
-        raise HTTPException(status_code=404, detail="Group not found")
     if user_id == group_id:
         raise HTTPException(status_code=400, detail="Cannot subscribe to yourself")
 
-    # Проверка на существующую подписку
-    existing = db_sess.query(Subscription).filter_by(user_id=user_id, group_id=group_id).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Already subscribed")
+    user = db_sess.query(Users).filter(Users.id == user_id).first()
+    group = db_sess.query(Users).filter(Users.id == group_id, Users.is_group == True).with_for_update().first()
 
-    subscription = Subscription(
-        id=str(uuid4()),
-        user_id=user_id,
-        group_id=group_id
-    )
-    db_sess.add(subscription)
-    db_sess.commit()
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
 
-    # Можно увеличить счётчик у группы
-    group.subscriber_count = db_sess.query(Subscription).filter_by(group_id=group_id).count()
-    db_sess.commit()
+    try:
+        existing_sub = db_sess.query(Subscription).filter_by(user_id=user_id, group_id=group_id).first()
+        if existing_sub:
+            # Отписываемся
+            db_sess.delete(existing_sub)
+            group.subscriber_count = max(group.subscriber_count - 1, 0)
+            action = "unsubscribed"
+        else:
+            # Подписываемся
+            new_sub = Subscription(id=str(uuid4()), user_id=user_id, group_id=group_id)
+            db_sess.add(new_sub)
+            group.subscriber_count += 1
+            action = "subscribed"
 
-    return {"detail": "Subscribed successfully"}
+        db_sess.commit()
+    except sqlalchemy.exc.SQLAlchemyError:
+        db_sess.rollback()
+        raise HTTPException(status_code=500, detail="DB error")
+
+    return {"detail": f"{action} successfully", "subscriber_count": group.subscriber_count}
+
 
 @app.get("/users", response_model=List[UserRead])
 def get_entities(db_sess: Session = Depends(get_db)):
     users = db_sess.query(Users).all()
 
     # Приводим None к пустому списку для additional_tags
-    for u in users :
+    for u in users:
         if u.additional_tags is None:
             u.additional_tags = []
 
     # Объединяем всё в один список
     return users
+
 
 @app.delete("/delete_user")
 def delete_user(request: Request, db_sess: Session = Depends(get_db)):
@@ -667,6 +648,7 @@ def get_posts(
             "content": post.content,
             "created_at": post.created_at,
             "owner_id": post.owner_id,
+            "likes_count": post.likes_count,
             "attachments": [
                 {"id": a.id, "file_url": a.file_url} for a in post.attachments
             ]
@@ -701,6 +683,7 @@ def get_posts(
             "content": post.content,
             "created_at": post.created_at,
             "owner_id": post.owner_id,
+            "likes_count": post.likes_count,
             "attachments": [
                 {"id": a.id, "file_url": a.file_url} for a in post.attachments
             ]
@@ -712,7 +695,9 @@ def get_posts(
         "has_more": len(posts) == limit  # 👈 фронт может использовать это для проверки
     }
 
+
 from sqlalchemy import or_, func
+
 
 @app.get("/search/users")
 def search_users(
@@ -754,6 +739,37 @@ def search_users(
         "has_more": len(users) == limit
     }
 
+
+@app.post("/posts/{post_id}/like-toggle")
+async def toggle_like(post_id: str, request: Request, db_sess: Session = Depends(get_db)):
+    user_id = request.state.user
+    if not user_id:
+        raise HTTPException(status_code=401, detail="No token provided")
+
+    post = db_sess.query(Posts).filter(Posts.id == post_id).with_for_update().first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    try:
+        existing_like = db_sess.query(PostLike).filter_by(post_id=post_id, user_id=user_id).first()
+        if existing_like:
+            # Удаляем лайк
+            db_sess.delete(existing_like)
+            post.likes_count = max(post.likes_count - 1, 0)
+            action = "unliked"
+        else:
+            # Добавляем лайк
+            new_like = PostLike(id=str(uuid4()), post_id=post_id, user_id=user_id)
+            db_sess.add(new_like)
+            post.likes_count += 1
+            action = "liked"
+
+        db_sess.commit()
+    except sqlalchemy.exc.SQLAlchemyError:
+        db_sess.rollback()
+        raise HTTPException(status_code=500, detail="DB error")
+
+    return {"detail": f"Post {action} successfully", "likes_count": post.likes_count}
 
 
 if __name__ == "__main__":

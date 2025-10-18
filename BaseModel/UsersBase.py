@@ -3,14 +3,17 @@ from typing import Optional, List
 
 class UsersBase(BaseModel):
     email: EmailStr
+    phone: Optional[str] = None  # новое поле
     password: str
     is_group: bool
     description: Optional[str] = None
 
+    # Для групп
     company_name: Optional[str] = None
     main_tag: Optional[str] = None
-    additional_tags: List[str] | None
+    additional_tags: Optional[List[str]] = None
 
+    # Для пользователей
     name: Optional[str] = None
     age: Optional[int] = None
 
