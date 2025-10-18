@@ -419,7 +419,7 @@ async def update_user(
 
     # Проверяем предыдущий пароль
     if not verify_password(previous_password, db_user.password):
-        raise HTTPException(status_code=400, detail="Incorrect previous password")
+        raise HTTPException(status_code=400, detail="Incorrect previous password1")
 
     # Обновляем поля
     db_user.email = email  # email обязателен
