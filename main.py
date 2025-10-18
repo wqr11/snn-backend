@@ -98,7 +98,7 @@ def get_user_id_from_token_header(authorization: str) -> str:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # адрес React
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
