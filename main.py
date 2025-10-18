@@ -98,9 +98,9 @@ def get_user_id_from_token_header(authorization: str) -> str:
 # <CHANGE> Fixed CORS configuration for mobile app support
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # For development. In production, specify exact origins
-    allow_credentials=False,  # Set to False when using "*" for origins
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_origins=["*"],  # адрес React
+    allow_credentials=False,
+    allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["*"],
 )
@@ -353,8 +353,7 @@ async def update_user(
         name: str = Form(None),
         age: int = Form(None),
         company_name: str = Form(None),
-        avatar: UploadFile = File(None),
-        authorization: Optional[str] = Header(None),
+        avatar: UploadFile | None = File(None),
         db_sess: Session = Depends(get_db)
 ):
     auth_header = request.headers.get("Authorization")
@@ -392,10 +391,8 @@ async def update_user(
     else:
         if company_name:
             db_user.company_name = company_name
-
     if avatar:
         avatar_url = await save_file_locally(avatar)
-        print(avatar)
         db_user.avatar_url = avatar_url
 
     db_sess.commit()
@@ -434,6 +431,7 @@ def group_subscribers(group_id: str, db_sess: Session = Depends(get_db)):
         })
 
     return result
+
 
 
 @app.get("/my-subscriptions")
