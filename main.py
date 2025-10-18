@@ -76,25 +76,23 @@ async def verify_refresh_token(user_id: str, token: str):
     return stored_token == token
 
 
-def get_user_id_from_token(token: str) -> str:
+def get_user_id_from_token_header(authorization: str) -> str:
     """
-    Декодирует JWT access токен и возвращает user_id.
+    Декодирует JWT access токен из заголовка Authorization и возвращает user_id.
     Выбрасывает HTTPException, если токен некорректный.
     """
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Authorization header missing or invalid")
+
+    token = authorization.split(" ")[1]
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id: str = payload.get("sub")
         if not user_id:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token: missing user ID"
-            )
+            raise HTTPException(status_code=401, detail="Invalid token: missing user ID")
         return user_id
     except JWTError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token"
-        )
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 
 app.add_middleware(
@@ -215,39 +213,18 @@ async def login_user(user: UserLogin, response: Response, db_sess: Session = Dep
     # 3️⃣ Сохраняем refresh-токен в Redis
     await save_refresh_token(db_user.id, refresh_token)
 
-    # 4️⃣ Устанавливаем refresh-токен в cookie
-    response.set_cookie(
-        key="refresh_token",
-        value=refresh_token,
-        httponly=True,  # защищает от JS-доступа
-        secure=False,  # True в проде, по HTTPS
-        samesite="lax",
-        max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600,
-    )
+    # ✅ Возвращаем токены в заголовках
+    response.headers["access_token"] = access_token
+    response.headers["refresh_token"] = refresh_token
 
-    # 5️⃣ Устанавливаем access-токен в cookie
-    response.set_cookie(
-        key="access_token",
-        value=access_token,
-        httponly=False,  # фронтенд может читать
-        secure=False,  # True в проде, по HTTPS
-        samesite="lax",
-        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,  # срок жизни access-токена
-    )
-
-    # 6️⃣ Возвращаем токены в теле запроса тоже
-    return {
-        "access_token": access_token,
-        "token_type": "bearer"
-    }
+    return {"detail": "Login successful"}
 
 
 @app.post("/refresh")
 async def refresh_token(request: Request, response: Response):
-    # Получаем токен из cookies
-    refresh_token = request.cookies.get("refresh_token")
+    refresh_token = request.headers.get("refresh_token")
     if not refresh_token:
-        raise HTTPException(status_code=401, detail="Missing refresh token")
+        raise HTTPException(status_code=401, detail="Refresh token header missing")
 
     # Декодируем токен
     try:
@@ -273,78 +250,56 @@ async def refresh_token(request: Request, response: Response):
     new_refresh_token = create_refresh_token({"sub": user_id}, db_sess=None)
     await save_refresh_token(user_id, new_refresh_token)
 
-    # Перезаписываем cookie
-    response.set_cookie(
-        key="refresh_token",
-        value=new_refresh_token,
-        httponly=True,
-        secure=False,
-        samesite="lax",
-        max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600,
-    )
-    # 5️⃣ Устанавливаем access-токен в cookie
-    response.set_cookie(
-        key="access_token",
-        value=new_access_token,
-        httponly=False,  # фронтенд может читать
-        secure=False,  # True в проде, по HTTPS
-        samesite="lax",
-        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,  # срок жизни access-токена
-    )
+    response.headers["access_token"] = new_access_token
+    response.headers["refresh_token"] = new_refresh_token
 
-    return {"access_token": new_access_token}
+    return {"detail": "Tokens refreshed"}
 
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     """
-    Middleware для проверки access_token только из cookies.
+    Middleware для проверки access_token из headers (Authorization: Bearer <token>)
     """
-    # Пытаемся достать токен из cookies
-    token = request.cookies.get("access_token")
+    auth_header = request.headers.get("Authorization")
 
-    # Если токена нет — продолжаем без авторизации
-    if not token:
+    if not auth_header or not auth_header.startswith("Bearer "):
         request.state.user = None
-        response = await call_next(request)
-        return response
+        return await call_next(request)
+
+    token = auth_header.split(" ")[1]
 
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: str = payload.get("sub")
-        token_type: str = payload.get("type")
+
+
+        user_id = payload.get("sub")
+        print("XUIUASDIUASIDUSAIDUSAI")
+        token_type = payload.get("type")
+
+
 
         if token_type != "access":
             raise JWTError("Not an access token")
 
-        # ✅ Добавляем user_id в request.state
         request.state.user = user_id
-
     except JWTError:
-        # ❌ Неверный или просроченный токен
         return JSONResponse(status_code=401, content={"detail": "Invalid or expired access token"})
 
-    # Продолжаем выполнение запроса
-    response = await call_next(request)
-    return response
+    return await call_next(request)
+
 
 
 @app.get("/me")
 def about_me(request: Request, db_sess: Session = Depends(get_db)):
-    # 1️⃣ Проверяем токен из cookies
-    token = request.cookies.get("access_token")
-    if not token:
-        raise HTTPException(status_code=401, detail="No token provided")
+    user_id = request.state.user
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
-    # 2️⃣ Получаем user_id из токена
-    user_id = get_user_id_from_token(token)
-
-    # 3️⃣ Ищем пользователя
     db_user = db_sess.query(Users).filter(Users.id == user_id).first()
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # 4️⃣ Возвращаем разные данные для разных типов пользователей
     if db_user.is_group:
         return {
             "id": db_user.id,
@@ -374,16 +329,14 @@ def about_me(request: Request, db_sess: Session = Depends(get_db)):
         }
 
 
+
 @app.post("/logout", response_model=None)
 async def logout(request: Request):
-    # Получаем токен только из cookies
-    token = request.cookies.get("access_token")
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        raise HTTPException(status_code=401, detail="Authorization header missing")
 
-    if not token:
-        raise HTTPException(status_code=401, detail="No token provided")
-
-    # Получаем id пользователя из токена
-    user_id = get_user_id_from_token(token)
+    user_id = get_user_id_from_token_header(auth_header)
 
     # Удаляем refresh-токен из Redis
     await redis_client.delete(f"refresh:{user_id}")
@@ -407,11 +360,11 @@ async def update_user(
         avatar: UploadFile = File(None),
         db_sess: Session = Depends(get_db)
 ):
-    # Получаем user_id из токена
-    token = request.cookies.get("access_token")
-    if not token:
-        raise HTTPException(status_code=401, detail="No token provided")
-    user_id = get_user_id_from_token(token)
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        raise HTTPException(status_code=401, detail="Authorization header missing")
+
+    user_id = get_user_id_from_token_header(auth_header)
 
     db_user = db_sess.query(Users).filter(Users.id == user_id).first()
     if not db_user:
@@ -445,6 +398,7 @@ async def update_user(
 
     if avatar:
         avatar_url = await save_file_locally(avatar)
+        print(avatar)
         db_user.avatar_url = avatar_url
 
     db_sess.commit()
@@ -557,14 +511,12 @@ def get_entities(db_sess: Session = Depends(get_db)):
 
 @app.delete("/delete_user")
 def delete_user(request: Request, db_sess: Session = Depends(get_db)):
-    # Получаем токен только из cookies
-    token = request.cookies.get("access_token")
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        raise HTTPException(status_code=401, detail="Authorization header missing")
 
-    if not token:
-        raise HTTPException(status_code=401, detail="No token provided")
+    user_id = get_user_id_from_token_header(auth_header)
 
-    # Получаем id пользователя из токена
-    user_id = get_user_id_from_token(token)
     user = db_sess.query(Users).filter(Users.id == user_id).first()
     db_sess.delete(user)
 
