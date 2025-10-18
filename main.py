@@ -204,9 +204,9 @@ async def login_user(user: UserLogin, response: Response, db_sess: Session = Dep
     # 1️⃣ Проверяем пользователя
     db_user = db_sess.query(Users).filter(Users.email == user.email).first()
     if not db_user:
-        raise HTTPException(status_code=400, detail="Invalid email or password")
+        raise HTTPException(status_code=401, detail="Invalid email or password")
     if not verify_password(user.password, db_user.password):
-        raise HTTPException(status_code=400, detail="Invalid email or password")
+        raise HTTPException(status_code=401, detail="Invalid email or password")
 
     # 2️⃣ Генерируем токены
     access_token = create_access_token(data={"sub": str(db_user.id)})
