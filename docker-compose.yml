@@ -33,16 +33,16 @@ services:
           cpus: "0.25"
           memory: 256M
 
-  backend:
-    container_name: ssn_backend
-    build: .
-    restart: always
-    ports:
-      - 8000:8000
-    networks:
-      - ssn_net
-    env_file:
-      - .env
+  # backend:
+  #   container_name: ssn_backend
+  #   build: .
+  #   restart: always
+  #   ports:
+  #     - 8000:8000
+  #   networks:
+  #     - ssn_net
+  #   env_file:
+  #     - .env
 
 networks:
   ssn_net:
