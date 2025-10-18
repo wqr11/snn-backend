@@ -170,6 +170,7 @@ async def reg_user(
         new_user = Users(
             id=user_id,
             email=item.email,
+            phone=item.phone,  # добавляем phone
             password=hashed_password(item.password),
             description=item.description,
             is_group=item.is_group,
@@ -179,13 +180,13 @@ async def reg_user(
         if item.is_group:
             new_user.company_name = item.company_name
             new_user.main_tag = item.main_tag  # основной тег для компании
-            new_user.additional_tags = item.additional_tags
+            new_user.additional_tags = item.additional_tags or []
             new_user.subscriber_count = 0  # начальное количество подписчиков
         else:
             new_user.name = item.name
             new_user.age = item.age
             new_user.main_tag = item.main_tag  # должность
-            new_user.additional_tags = item.additional_tags
+            new_user.additional_tags = item.additional_tags or []
             new_user.subscriptions_count = 0  # начальное количество подписок
 
         db_sess.add(new_user)
