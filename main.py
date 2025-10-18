@@ -272,12 +272,8 @@ async def auth_middleware(request: Request, call_next):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
 
-
         user_id = payload.get("sub")
-        print("XUIUASDIUASIDUSAIDUSAI")
         token_type = payload.get("type")
-
-
 
         if token_type != "access":
             raise JWTError("Not an access token")
@@ -287,7 +283,6 @@ async def auth_middleware(request: Request, call_next):
         return JSONResponse(status_code=401, content={"detail": "Invalid or expired access token"})
 
     return await call_next(request)
-
 
 
 @app.get("/me")
@@ -327,7 +322,6 @@ def about_me(request: Request, db_sess: Session = Depends(get_db)):
             "avatar_url": db_user.avatar_url,
             "subscriptions_count": db_user.subscriptions_count,
         }
-
 
 
 @app.post("/logout", response_model=None)
@@ -372,7 +366,7 @@ async def update_user(
 
     # Проверяем предыдущий пароль
     if not verify_password(previous_password, db_user.password):
-        raise HTTPException(status_code=400, detail="Incorrect previous password1")
+        raise HTTPException(status_code=400, detail="Incorrect previous password")
 
     # Обновляем поля
     db_user.email = email  # email обязателен
