@@ -3,6 +3,7 @@ from sqlalchemy.orm import relationship
 from models.db_session import SqlAlchemyBase
 
 
+
 class Users(SqlAlchemyBase):
     __tablename__ = "users"
 
@@ -19,21 +20,36 @@ class Users(SqlAlchemyBase):
 
     # Только для групп
     company_name = Column(String, nullable=True)
-    subscriber_count = Column(Integer, nullable=True, default=0)
+    subscriber_count = Column(Integer, nullable=True, default=0)  # кол-во подписчиков
 
     # Только для обычных пользователей
     name = Column(String, nullable=True)
     age = Column(Integer, nullable=True)
-    subscriptions_count = Column(Integer, nullable=True, default=0)
+    subscriptions_count = Column(Integer, nullable=True, default=0)  # кол-во подписок
 
+    # Связи
     posts = relationship("Posts", back_populates="owner", cascade="all, delete")
+
+    # Подписки
+    subscriptions = relationship(
+        "Subscription",
+        foreign_keys="[Subscription.user_id]",
+        back_populates="user",
+        cascade="all, delete-orphan"
+    )
+    # Подписчики (только для группы)
+    subscribers = relationship(
+        "Subscription",
+        foreign_keys="[Subscription.group_id]",
+        back_populates="group",
+        cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         CheckConstraint(
-            # 🔒 Проверка: если is_group = true, то должны быть указаны поля компании
+            # Проверка валидности данных для пользователей и групп
             "(is_group = true AND company_name IS NOT NULL AND main_tag IS NOT NULL AND name IS NULL AND age IS NULL) "
             "OR "
-            # 🔒 Проверка: если is_group = false, то должны быть указаны поля пользователя
             "(is_group = false AND name IS NOT NULL AND age IS NOT NULL AND main_tag IS NOT NULL AND company_name IS NULL)",
             name="check_user_group_data_validity"
         ),

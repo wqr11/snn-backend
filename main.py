@@ -32,9 +32,9 @@ from models.attachments import Attachment
 from pathlib import Path
 import shutil
 from models.db_session import SqlAlchemyBase
+from models.subscriptions import Subscription
 
 target_metadata = SqlAlchemyBase.metadata
-
 
 
 def get_db():
@@ -199,7 +199,6 @@ async def reg_user(
     return new_user
 
 
-
 @app.post("/login")
 async def login_user(user: UserLogin, response: Response, db_sess: Session = Depends(get_db)):
     # 1️⃣ Проверяем пользователя
@@ -351,6 +350,49 @@ async def auth_middleware(request: Request, call_next):
     return response
 
 
+@app.get("/me")
+def about_me(request: Request, db_sess: Session = Depends(get_db)):
+    # 1️⃣ Проверяем токен из cookies
+    token = request.cookies.get("access_token")
+    if not token:
+        raise HTTPException(status_code=401, detail="No token provided")
+
+    # 2️⃣ Получаем user_id из токена
+    user_id = get_user_id_from_token(token)
+
+    # 3️⃣ Ищем пользователя
+    db_user = db_sess.query(Users).filter(Users.id == user_id).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # 4️⃣ Возвращаем разные данные для разных типов пользователей
+    if db_user.is_group:
+        return {
+            "id": db_user.id,
+            "email": db_user.email,
+            "is_group": db_user.is_group,
+            "company_name": db_user.company_name,
+            "description": db_user.description,
+            "main_tag": db_user.main_tag,
+            "additional_tags": db_user.additional_tags,
+            "avatar_url": db_user.avatar_url,
+            "subscriber_count": db_user.subscriber_count,
+        }
+    else:
+        return {
+            "id": db_user.id,
+            "email": db_user.email,
+            "is_group": db_user.is_group,
+            "name": db_user.name,
+            "age": db_user.age,
+            "description": db_user.description,
+            "main_tag": db_user.main_tag,
+            "additional_tags": db_user.additional_tags,
+            "avatar_url": db_user.avatar_url,
+            "subscriptions_count": db_user.subscriptions_count,
+        }
+
+
 @app.post("/logout", response_model=None)
 async def logout(request: Request, authorization: Optional[str] = Header(None)):
     # <CHANGE> Support both cookie and Authorization header for logout
@@ -458,10 +500,113 @@ async def update_user(
     }
 
 
-@app.get("/users")
-def get_users(db_sess: Session = Depends(get_db)):
-    return db_sess.query(Users).all()
 
+@app.get("/group-subscribers/{group_id}")
+def group_subscribers(group_id: str, db_sess: Session = Depends(get_db)):
+    group = db_sess.query(Users).filter(Users.id == group_id, Users.is_group == True).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    subscribers = db_sess.query(Subscription).filter_by(group_id=group_id).all()
+    result = []
+    for sub in subscribers:
+        user = db_sess.query(Users).filter(Users.id == sub.user_id).first()
+        result.append({
+            "user_id": user.id,
+            "name": user.name,
+            "main_tag": user.main_tag,
+            "avatar_url": user.avatar_url
+        })
+
+    return result
+
+
+@app.get("/my-subscriptions")
+def my_subscriptions(request: Request, db_sess: Session = Depends(get_db)):
+    user_id = request.state.user
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    subscriptions = db_sess.query(Subscription).filter_by(user_id=user_id).all()
+    result = []
+    for sub in subscriptions:
+        group = db_sess.query(Users).filter(Users.id == sub.group_id).first()
+        result.append({
+            "group_id": group.id,
+            "company_name": group.company_name,
+            "main_tag": group.main_tag,
+            "avatar_url": group.avatar_url
+        })
+
+    return result
+
+
+
+@app.delete("/unsubscribe/{group_id}")
+def unsubscribe_group(group_id: str, request: Request, db_sess: Session = Depends(get_db)):
+    user_id = request.state.user
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    subscription = db_sess.query(Subscription).filter_by(user_id=user_id, group_id=group_id).first()
+    if not subscription:
+        raise HTTPException(status_code=404, detail="Not subscribed")
+
+    db_sess.delete(subscription)
+    db_sess.commit()
+
+    # Обновляем счётчик подписчиков
+    group = db_sess.query(Users).filter(Users.id == group_id).first()
+    group.subscriber_count = db_sess.query(Subscription).filter_by(group_id=group_id).count()
+    db_sess.commit()
+
+    return {"detail": "Unsubscribed successfully"}
+
+
+@app.post("/subscribe/{group_id}")
+def subscribe_group(group_id: str, request: Request, db_sess: Session = Depends(get_db)):
+    user_id = request.state.user
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    user = db_sess.query(Users).filter(Users.id == user_id).first()
+    group = db_sess.query(Users).filter(Users.id == group_id, Users.is_group == True).first()
+
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+    if user_id == group_id:
+        raise HTTPException(status_code=400, detail="Cannot subscribe to yourself")
+
+    # Проверка на существующую подписку
+    existing = db_sess.query(Subscription).filter_by(user_id=user_id, group_id=group_id).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Already subscribed")
+
+    subscription = Subscription(
+        id=str(uuid4()),
+        user_id=user_id,
+        group_id=group_id
+    )
+    db_sess.add(subscription)
+    db_sess.commit()
+
+    # Можно увеличить счётчик у группы
+    group.subscriber_count = db_sess.query(Subscription).filter_by(group_id=group_id).count()
+    db_sess.commit()
+
+    return {"detail": "Subscribed successfully"}
+
+@app.get("/users", response_model=List[UserRead])
+def get_entities(db_sess: Session = Depends(get_db)):
+    users = db_sess.query(Users).all()
+
+    # Приводим None к пустому списку для additional_tags
+    for u in users :
+        if u.additional_tags is None:
+            u.additional_tags = []
+
+    # Объединяем всё в один список
+    return users
 
 @app.delete("/delete_user")
 def delete_user(request: Request, authorization: Optional[str] = Header(None), db_sess: Session = Depends(get_db)):
@@ -610,10 +755,10 @@ def get_posts(
 
 @app.get("/search/users")
 def search_users(
-    tag: str = Query(..., min_length=1, description="Search tag"),
-    offset: int = Query(0, ge=0),
-    limit: int = Query(20, le=50),
-    db_sess: Session = Depends(get_db)
+        tag: str = Query(..., min_length=1, description="Search tag"),
+        offset: int = Query(0, ge=0),
+        limit: int = Query(20, le=50),
+        db_sess: Session = Depends(get_db)
 ):
     """
     Поиск пользователей по main_tag и additional_tags.
