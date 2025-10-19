@@ -122,7 +122,36 @@ allow_headers=["*"]
 
 ## 📁 Работа с файлами
 
-Статические файлы сохраняются в `/var/www/public/` и обслуживаются через nginx.
+Статические файлы сохраняются в `/var/www/public/` на VPS
+### Конфигурация nginx
+```
+user www-data;
+worker_processes auto;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+
+include /etc/nginx/mime.types;
+default_type application/octet-stream;
+
+sendfile on;
+keepalive_timeout 65;
+
+server {
+    listen 80;
+    root /var/www/public;
+    
+    # Serve static files
+    location / {
+        autoindex on;
+        try_files $uri $uri/ =404;
+    }
+
+}}
+```
 
 ## 🚀 Production развертывание
 
