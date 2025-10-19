@@ -1,3 +1,5 @@
+from sys import api_version
+
 from BaseModel.UserUpdateBase import UsersUpdateBase
 from models.PostLike import PostLike
 from models.db_session import global_init
@@ -150,50 +152,71 @@ async def save_file_locally(file: UploadFile) -> str:
     return f"/public/{filename}"
 
 
-@app.post("/register", response_model=UserRead)
-async def reg_user(
-        item: UsersBase,
+
+@app.post("/register")
+async def register_user(
+        email: str = Form(...),  # обязательно
+        password: str = Form(...),  # обязательно
+        phone: str | None = Form(None),
+        description: str | None = Form(None),
+        main_tag: str | None = Form(None),
+        additional_tags: str | None = Form(None),
+        name: str | None = Form(None),
+        age: int | None = Form(None),
+        company_name: str | None = Form(None),
+        is_group: bool = Form(False),
+        avatar: UploadFile | None = File(None),
         db_sess: Session = Depends(get_db)
 ):
     # Проверка на существующий email
-    if db_sess.query(Users).filter(Users.email == item.email).first():
+    if db_sess.query(Users).filter(Users.email == email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    # Генерация нового пользователя
-    try:
-        user_id = str(uuid4())
+    user_id = str(uuid4())
+    new_user = Users(
+        id=user_id,
+        email=email,
+        phone=phone,
+        password=hashed_password(password),
+        description=description,
+        is_group=is_group
+    )
 
-        # Общие поля для всех пользователей
-        new_user = Users(
-            id=user_id,
-            email=item.email,
-            phone=item.phone,  # добавляем phone
-            password=hashed_password(item.password),
-            description=item.description,
-            is_group=item.is_group,
-        )
+    # Дополнительные поля в зависимости от типа пользователя
+    if is_group:
+        new_user.company_name = company_name
+        new_user.main_tag = main_tag
+        new_user.additional_tags = [tag.strip() for tag in additional_tags.split(",")] if additional_tags else []
+        new_user.subscriber_count = 0
+    else:
+        new_user.name = name
+        new_user.age = age
+        new_user.main_tag = main_tag
+        new_user.additional_tags = [tag.strip() for tag in additional_tags.split(",")] if additional_tags else []
+        new_user.subscriptions_count = 0
 
-        # Дополнительные поля в зависимости от типа
-        if item.is_group:
-            new_user.company_name = item.company_name
-            new_user.main_tag = item.main_tag  # основной тег для компании
-            new_user.additional_tags = item.additional_tags or []
-            new_user.subscriber_count = 0  # начальное количество подписчиков
-        else:
-            new_user.name = item.name
-            new_user.age = item.age
-            new_user.main_tag = item.main_tag  # должность
-            new_user.additional_tags = item.additional_tags or []
-            new_user.subscriptions_count = 0  # начальное количество подписок
+    # Сохраняем аватар, если есть
+    if avatar:
+        new_user.avatar_url = await save_file_locally(avatar)
 
-        db_sess.add(new_user)
-        db_sess.commit()
-        db_sess.refresh(new_user)
+    db_sess.add(new_user)
+    db_sess.commit()
+    db_sess.refresh(new_user)
 
-    except sqlalchemy.exc.StatementError:
-        raise HTTPException(status_code=400, detail='Bad request')
+    return {
+        "id": new_user.id,
+        "email": new_user.email,
+        "phone": new_user.phone,
+        "is_group": new_user.is_group,
+        "description": new_user.description,
+        "main_tag": new_user.main_tag,
+        "additional_tags": new_user.additional_tags,
+        "avatar_url": new_user.avatar_url,
+        "company_name": new_user.company_name if is_group else None,
+        "name": new_user.name if not is_group else None,
+        "age": new_user.age if not is_group else None
+    }
 
-    return new_user
 
 
 @app.post("/login")
