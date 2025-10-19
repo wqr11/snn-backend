@@ -43,7 +43,6 @@ class Users(SqlAlchemyBase):
 
     __table_args__ = (
         CheckConstraint(
-            # Проверка валидности данных для пользователей и групп
             "(is_group = true AND company_name IS NOT NULL AND main_tag IS NOT NULL AND name IS NULL AND age IS NULL) "
             "OR "
             "(is_group = false AND name IS NOT NULL AND age IS NOT NULL AND main_tag IS NOT NULL AND company_name IS NULL)",

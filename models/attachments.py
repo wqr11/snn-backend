@@ -8,5 +8,4 @@ class Attachment(SqlAlchemyBase):
     id = Column(String, primary_key=True)
     file_url = Column(String, nullable=False)
     post_id = Column(String, ForeignKey("posts.id"))
-    # 🔄 Связь с Posts
     post = relationship("Posts", back_populates="attachments")

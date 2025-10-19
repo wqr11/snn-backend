@@ -5,14 +5,11 @@ class UserRead(BaseModel):
     id: str
     email: str
     is_group: bool
-    # Пользовательские поля
     name: Optional[str] = None
     age: Optional[int] = None
     subscriptions_count: Optional[int] = None
-    # Поля компании
     company_name: Optional[str] = None
     subscriber_count: Optional[int] = None
-    # Общие поля
     description: Optional[str] = None
     main_tag: Optional[str] = None
     additional_tags: List[str] = []
