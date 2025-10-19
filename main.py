@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import sqlalchemy
 from BaseModel.PostBase import PostBase
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from argon2 import PasswordHasher
 from jose import JWTError, jwt
 import httpx
@@ -571,32 +571,51 @@ def get_posts(
         db_sess: Session = Depends(get_db)
 ):
     """
-    Возвращает ленту постов с ленивой загрузкой (pagination)
+    Возвращает ленту постов с полной информацией об авторе и вложениях (pagination)
     """
     posts = (
         db_sess.query(Posts)
+        .options(joinedload(Posts.owner))  # подгружаем владельца (lazy->eager)
+        .options(joinedload(Posts.attachments))
         .order_by(Posts.created_at.desc())
         .offset(offset)
         .limit(limit)
         .all()
     )
 
-    # Чтобы сразу вернуть и вложения
     result = []
     for post in posts:
+        owner = post.owner
         result.append({
             "id": post.id,
             "title": post.title,
             "content": post.content,
             "created_at": post.created_at,
-            "owner_id": post.owner_id,
             "likes_count": post.likes_count,
+            "owner": {
+                "id": owner.id,
+                "email": owner.email,
+                "phone": owner.phone,
+                "is_group": owner.is_group,
+                "description": owner.description,
+                "main_tag": owner.main_tag,
+                "additional_tags": owner.additional_tags,
+                "avatar_url": owner.avatar_url,
+                "company_name": owner.company_name if owner.is_group else None,
+                "name": owner.name if not owner.is_group else None,
+                "age": owner.age if not owner.is_group else None,
+                "subscriber_count": getattr(owner, "subscriber_count", None),
+                "subscriptions_count": getattr(owner, "subscriptions_count", None),
+            },
             "attachments": [
                 {"id": a.id, "file_url": a.file_url} for a in post.attachments
             ]
         })
 
-    return {"posts": result, "next_offset": offset + len(result)}
+    return {
+        "posts": result,
+        "next_offset": offset + len(result)
+    }
 
 
 @app.get("/posts/{user_id}")
