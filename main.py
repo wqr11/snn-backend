@@ -272,7 +272,7 @@ async def refresh_token(request: Request, response: Response):
     response.headers["access_token"] = new_access_token
     response.headers["refresh_token"] = new_refresh_token
 
-    return {"access_token": new_access_token, "refresh_token": refresh_token, "token_type": "bearer"}
+    return {"access_token": new_access_token, "refresh_token": new_refresh_token, "token_type": "bearer"}
 
 
 @app.middleware("http")
@@ -638,25 +638,14 @@ def get_posts(
     }
 
 
-from sqlalchemy import or_, func
-
-
-from sqlalchemy import or_
-
-from typing import Optional
-from fastapi import FastAPI, Query, Depends
-from sqlalchemy import or_
-from sqlalchemy.orm import Session
-
-app = FastAPI()
 
 @app.get("/search/users")
 def search_users(
-    tag: Optional[str] = Query(None, min_length=1, description="Поиск по тегу"),
-    is_group: Optional[bool] = Query(None, description="True — только группы, False — только пользователи"),
-    offset: int = Query(0, ge=0),
-    limit: int = Query(20, le=50),
-    db_sess: Session = Depends(get_db)
+        tag: Optional[str] = Query(None, min_length=1, description="Поиск по тегу"),
+        is_group: Optional[bool] = Query(None, description="True — только группы, False — только пользователи"),
+        offset: int = Query(0, ge=0),
+        limit: int = Query(20, le=50),
+        db_sess: Session = Depends(get_db)
 ):
     query = db_sess.query(Users)
 
@@ -697,7 +686,6 @@ def search_users(
         "next_offset": offset + len(users),
         "has_more": has_more
     }
-
 
 
 @app.post("/posts/{post_id}/like-toggle")
