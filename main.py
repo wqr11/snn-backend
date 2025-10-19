@@ -252,7 +252,7 @@ async def refresh_token(request: Request, response: Response):
     response.headers["access_token"] = new_access_token
     response.headers["refresh_token"] = new_refresh_token
 
-    return {"access_token": access_token, "refresh_token": refresh_token , "token_type": "bearer"}
+    return {"access_token": new_access_token, "refresh_token": refresh_token , "token_type": "bearer"}
 
 
 @app.middleware("http")
