@@ -6,38 +6,34 @@ class Users(SqlAlchemyBase):
     __tablename__ = "users"
 
     id = Column(String, primary_key=True)
-    email = Column(String, nullable=False, unique=True)  # общий для всех
-    phone = Column(String, nullable=True, unique=True)   # новый общий для всех
+    email = Column(String, nullable=False, unique=True)
+    phone = Column(String, nullable=True, unique=True)
     password = Column(String, nullable=False)
     is_group = Column(Boolean, nullable=False, default=False)
 
-    # Общие поля
     avatar_url = Column(String, nullable=True)
     description = Column(String, nullable=True)
     main_tag = Column(String, nullable=False)
     additional_tags = Column(ARRAY(String), default=[])
     posts_count = Column(Integer, default=0)
 
-    # Только для групп
     company_name = Column(String, nullable=True)
-    subscriber_count = Column(Integer, nullable=True, default=0)  # кол-во подписчиков
+    subscriber_count = Column(Integer, nullable=True, default=0)
 
-    # Только для обычных пользователей
     name = Column(String, nullable=True)
     age = Column(Integer, nullable=True)
-    subscriptions_count = Column(Integer, nullable=True, default=0)  # кол-во подписок
+    subscriptions_count = Column(Integer, nullable=True, default=0)
 
-    # Связи
+
     posts = relationship("Posts", back_populates="owner", cascade="all, delete")
 
-    # Подписки
+
     subscriptions = relationship(
         "Subscription",
         foreign_keys="[Subscription.user_id]",
         back_populates="user",
         cascade="all, delete-orphan"
     )
-    # Подписчики (только для группы)
     subscribers = relationship(
         "Subscription",
         foreign_keys="[Subscription.group_id]",

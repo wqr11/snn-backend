@@ -3,6 +3,7 @@ from sqlalchemy.orm import relationship
 from datetime import datetime
 from models.db_session import SqlAlchemyBase
 
+
 class Posts(SqlAlchemyBase):
     __tablename__ = 'posts'
 
@@ -12,11 +13,8 @@ class Posts(SqlAlchemyBase):
     created_at = Column(DateTime, default=datetime.utcnow)
     likes_count = Column(Integer, default=0)
 
-    # Связь с пользователем
     owner_id = Column(String, ForeignKey("users.id"), nullable=False)
     owner = relationship("Users", back_populates="posts")
 
-
-    # Вложения
     attachments = relationship("Attachment", back_populates="post", cascade="all, delete")
     likes = relationship("PostLike", back_populates="post", cascade="all, delete")

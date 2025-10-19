@@ -52,7 +52,7 @@ def get_db():
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # адрес React
+    allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -81,16 +81,11 @@ async def save_refresh_token(user_id: str, token: str):
 
 
 async def verify_refresh_token(user_id: str, token: str):
-    """Проверяем, совпадает ли refresh-токен"""
     stored_token = await redis_client.get(f"refresh:{user_id}")
     return stored_token == token
 
 
 def get_user_id_from_token_header(authorization: str) -> str:
-    """
-    Декодирует JWT access токен из заголовка Authorization и возвращает user_id.
-    Выбрасывает HTTPException, если токен некорректный.
-    """
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Authorization header missing or invalid")
 
@@ -105,7 +100,6 @@ def get_user_id_from_token_header(authorization: str) -> str:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 
-# генерация JWT
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
     expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
@@ -123,7 +117,6 @@ def create_refresh_token(data: dict, db_sess: Session, expires_delta: Optional[t
     return encoded_jwt
 
 
-# хеширование и проверка пароля
 def hashed_password(password):
     ph = PasswordHasher()
     return ph.hash(password)
@@ -138,24 +131,19 @@ PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
 
 
 async def save_file_locally(file: UploadFile) -> str:
-    """
-    Сохраняет файл локально в папке /public и возвращает относительный URL.
-    """
     filename = f"{uuid4()}-{file.filename}"
     file_path = PUBLIC_DIR / filename
 
-    # сохраняем файл на диск
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    # возвращаем путь, по которому можно будет получить файл
-    return f"/public/{filename}"
+    return f"/var/www/public/{filename}"
 
 
 @app.post("/register")
 async def register_user(
-        email: str = Form(...),  # обязательно
-        password: str = Form(...),  # обязательно
+        email: str = Form(...),
+        password: str = Form(...),
         phone: str | None = Form(None),
         description: str | None = Form(None),
         main_tag: str | None = Form(None),
@@ -167,7 +155,6 @@ async def register_user(
         avatar: UploadFile | None = File(None),
         db_sess: Session = Depends(get_db)
 ):
-    # Проверка на существующий email
     if db_sess.query(Users).filter(Users.email == email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
 
@@ -181,7 +168,6 @@ async def register_user(
         is_group=is_group
     )
 
-    # Дополнительные поля в зависимости от типа пользователя
     if is_group:
         new_user.company_name = company_name
         new_user.main_tag = main_tag
@@ -194,7 +180,6 @@ async def register_user(
         new_user.additional_tags = [tag.strip() for tag in additional_tags.split(",")] if additional_tags else []
         new_user.subscriptions_count = 0
 
-    # Сохраняем аватар, если есть
     if avatar:
         new_user.avatar_url = await save_file_locally(avatar)
 
@@ -219,21 +204,17 @@ async def register_user(
 
 @app.post("/login")
 async def login_user(user: UserLogin, response: Response, db_sess: Session = Depends(get_db)):
-    # 1️⃣ Проверяем пользователя
     db_user = db_sess.query(Users).filter(Users.email == user.email).first()
     if not db_user:
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if not verify_password(user.password, db_user.password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    # 2️⃣ Генерируем токены
     access_token = create_access_token(data={"sub": str(db_user.id)})
     refresh_token = create_refresh_token(data={"sub": str(db_user.id)}, db_sess=db_sess)
 
-    # 3️⃣ Сохраняем refresh-токен в Redis
     await save_refresh_token(db_user.id, refresh_token)
 
-    # ✅ Возвращаем токены в заголовках
     response.headers["access_token"] = access_token
     response.headers["refresh_token"] = refresh_token
 
@@ -246,7 +227,6 @@ async def refresh_token(request: Request, response: Response):
     if not refresh_token:
         raise HTTPException(status_code=401, detail="Refresh token header missing")
 
-    # Декодируем токен
     try:
         payload = jwt.decode(refresh_token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id: str = payload.get("sub")
@@ -258,15 +238,12 @@ async def refresh_token(request: Request, response: Response):
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
 
-    # Проверяем в Redis
     valid = await verify_refresh_token(user_id, refresh_token)
     if not valid:
         raise HTTPException(status_code=401, detail="Refresh token revoked or expired")
 
-    # Генерируем новый access-токен
     new_access_token = create_access_token({"sub": user_id})
 
-    # Можно обновить refresh токен (ротация)
     new_refresh_token = create_refresh_token({"sub": user_id}, db_sess=None)
     await save_refresh_token(user_id, new_refresh_token)
 
@@ -278,9 +255,6 @@ async def refresh_token(request: Request, response: Response):
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
-    """
-    Middleware для проверки access_token из headers (Authorization: Bearer <token>)
-    """
     auth_header = request.headers.get("Authorization")
 
     if not auth_header or not auth_header.startswith("Bearer "):
@@ -404,7 +378,6 @@ async def logout(request: Request):
 
     user_id = get_user_id_from_token_header(auth_header)
 
-    # Удаляем refresh-токен из Redis
     await redis_client.delete(f"refresh:{user_id}")
 
     return {"detail": "Logged out successfully"}
@@ -468,12 +441,12 @@ def toggle_subscription(group_id: str, request: Request, db_sess: Session = Depe
     try:
         existing_sub = db_sess.query(Subscription).filter_by(user_id=user_id, group_id=group_id).first()
         if existing_sub:
-            # Отписываемся
+
             db_sess.delete(existing_sub)
             group.subscriber_count = max(group.subscriber_count - 1, 0)
             action = "unsubscribed"
         else:
-            # Подписываемся
+
             new_sub = Subscription(id=str(uuid4()), user_id=user_id, group_id=group_id)
             db_sess.add(new_sub)
             group.subscriber_count += 1
@@ -491,12 +464,10 @@ def toggle_subscription(group_id: str, request: Request, db_sess: Session = Depe
 def get_entities(db_sess: Session = Depends(get_db)):
     users = db_sess.query(Users).all()
 
-    # Приводим None к пустому списку для additional_tags
     for u in users:
         if u.additional_tags is None:
             u.additional_tags = []
 
-    # Объединяем всё в один список
     return users
 
 
@@ -511,7 +482,6 @@ def delete_user(request: Request, db_sess: Session = Depends(get_db)):
     user = db_sess.query(Users).filter(Users.id == user_id).first()
     db_sess.delete(user)
 
-    # 3️⃣ Сохраняем изменения
     db_sess.commit()
     return {"detail": "User deleted successfully"}
 
@@ -524,7 +494,6 @@ async def create_post(
         file: UploadFile | None = File(None),
         db_sess: Session = Depends(get_db)
 ):
-    # 1️⃣ Проверка авторизации через middleware
     user_id = request.state.user
     if not user_id:
         raise HTTPException(status_code=401, detail="No token provided")
@@ -532,7 +501,6 @@ async def create_post(
     user = db_sess.query(Users).filter(Users.id == user_id).first()
     user.posts_count += 1
 
-    # 2️⃣ Создаём пост
     post_id = str(uuid4())
     new_post = Posts(
         id=post_id,
@@ -546,7 +514,6 @@ async def create_post(
 
     attachment_url = None
 
-    # 3️⃣ Если передан файл — сохраняем его в /public
     if file:
         attachment_url = await save_file_locally(file)
         new_attachment = Attachment(
@@ -571,12 +538,9 @@ def get_posts(
         limit: int = Query(10, le=50),
         db_sess: Session = Depends(get_db)
 ):
-    """
-    Возвращает ленту постов с полной информацией об авторе и вложениях (pagination)
-    """
     posts = (
         db_sess.query(Posts)
-        .options(joinedload(Posts.owner))  # подгружаем владельца (lazy->eager)
+        .options(joinedload(Posts.owner))
         .options(joinedload(Posts.attachments))
         .order_by(Posts.created_at.desc())
         .offset(offset)
@@ -626,12 +590,8 @@ def get_posts(
         offset: int = Query(0, ge=0),
         limit: int = Query(10, le=50),
 ):
-    """
-    Возвращает посты с ленивой загрузкой (пагинация) и возможностью фильтрации по пользователю.
-    """
     query = db_sess.query(Posts).order_by(Posts.created_at.desc())
 
-    # 🔹 Если указан user_id — фильтруем только его посты
     if user_id:
         query = query.filter(Posts.owner_id == user_id)
 
@@ -654,7 +614,7 @@ def get_posts(
     return {
         "posts": result,
         "next_offset": offset + len(result),
-        "has_more": len(posts) == limit  # 👈 фронт может использовать это для проверки
+        "has_more": len(posts) == limit
     }
 
 
@@ -668,21 +628,18 @@ def search_users(
 ):
     query = db_sess.query(Users)
 
-    # Фильтр по is_group, если указан
     if is_group is not None:
         query = query.filter(Users.is_group == is_group)
 
-    # Фильтр по тегу, если указан
     if tag:
         tag_pattern = f"%{tag.lower()}%"
         query = query.filter(
             or_(
                 Users.main_tag.ilike(tag_pattern),
-                Users.additional_tags.any(tag.lower())  # для Postgres массивов
+                Users.additional_tags.any(tag.lower())
             )
         )
 
-    # Пагинация
     users = query.offset(offset).limit(limit).all()
 
     results = [{
@@ -720,12 +677,12 @@ async def toggle_like(post_id: str, request: Request, db_sess: Session = Depends
     try:
         existing_like = db_sess.query(PostLike).filter_by(post_id=post_id, user_id=user_id).first()
         if existing_like:
-            # Удаляем лайк
+
             db_sess.delete(existing_like)
             post.likes_count = max(post.likes_count - 1, 0)
             action = "unliked"
         else:
-            # Добавляем лайк
+
             new_like = PostLike(id=str(uuid4()), post_id=post_id, user_id=user_id)
             db_sess.add(new_like)
             post.likes_count += 1
