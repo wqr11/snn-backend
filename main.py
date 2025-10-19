@@ -104,7 +104,6 @@ def get_user_id_from_token_header(authorization: str) -> str:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 
-
 # генерация JWT
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
@@ -150,7 +149,6 @@ async def save_file_locally(file: UploadFile) -> str:
 
     # возвращаем путь, по которому можно будет получить файл
     return f"/public/{filename}"
-
 
 
 @app.post("/register")
@@ -218,7 +216,6 @@ async def register_user(
     }
 
 
-
 @app.post("/login")
 async def login_user(user: UserLogin, response: Response, db_sess: Session = Depends(get_db)):
     # 1️⃣ Проверяем пользователя
@@ -239,7 +236,7 @@ async def login_user(user: UserLogin, response: Response, db_sess: Session = Dep
     response.headers["access_token"] = access_token
     response.headers["refresh_token"] = refresh_token
 
-    return {"access_token": access_token, "refresh_token": refresh_token , "token_type": "bearer"}
+    return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
 
 
 @app.post("/refresh")
@@ -275,7 +272,7 @@ async def refresh_token(request: Request, response: Response):
     response.headers["access_token"] = new_access_token
     response.headers["refresh_token"] = new_refresh_token
 
-    return {"access_token": new_access_token, "refresh_token": refresh_token , "token_type": "bearer"}
+    return {"access_token": new_access_token, "refresh_token": refresh_token, "token_type": "bearer"}
 
 
 @app.middleware("http")
@@ -306,6 +303,7 @@ async def auth_middleware(request: Request, call_next):
 
     return await call_next(request)
 
+
 @app.middleware("http")
 async def add_cors_headers(request: Request, call_next):
     response = await call_next(request)
@@ -313,6 +311,46 @@ async def add_cors_headers(request: Request, call_next):
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
     response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
     return response
+
+@app.get("/about_user/{id}")
+def about_me(id: str, request: Request, db_sess: Session = Depends(get_db)):
+    user_id = request.state.user
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    db_user = db_sess.query(Users).filter(Users.id == id).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if db_user.is_group:
+        return {
+            "id": db_user.id,
+            "email": db_user.email,
+            "is_group": db_user.is_group,
+            "company_name": db_user.company_name,
+            "description": db_user.description,
+            "main_tag": db_user.main_tag,
+            "additional_tags": db_user.additional_tags,
+            "avatar_url": db_user.avatar_url,
+            "subscriber_count": db_user.subscriber_count,
+            "phone": db_user.phone,
+            "posts_count": db_user.posts_count,
+            "age": db_user.age
+        }
+    else:
+        return {
+            "id": db_user.id,
+            "email": db_user.email,
+            "is_group": db_user.is_group,
+            "name": db_user.name,
+            "age": db_user.age,
+            "description": db_user.description,
+            "main_tag": db_user.main_tag,
+            "additional_tags": db_user.additional_tags,
+            "avatar_url": db_user.avatar_url,
+            "posts_count": db_user.posts_count,
+            "subscriptions_count": db_user.subscriptions_count,
+        }
 
 
 @app.get("/me")
@@ -336,6 +374,7 @@ def about_me(request: Request, db_sess: Session = Depends(get_db)):
             "additional_tags": db_user.additional_tags,
             "avatar_url": db_user.avatar_url,
             "subscriber_count": db_user.subscriber_count,
+            "posts_count": db_user.posts_count,
             "phone": db_user.phone,
             "age": db_user.age
         }
@@ -350,6 +389,7 @@ def about_me(request: Request, db_sess: Session = Depends(get_db)):
             "main_tag": db_user.main_tag,
             "additional_tags": db_user.additional_tags,
             "avatar_url": db_user.avatar_url,
+            "posts_count": db_user.posts_count,
             "subscriptions_count": db_user.subscriptions_count,
         }
 
@@ -366,79 +406,6 @@ async def logout(request: Request):
     await redis_client.delete(f"refresh:{user_id}")
 
     return {"detail": "Logged out successfully"}
-
-
-@app.patch("/update_user")
-async def update_user(
-        request: Request,
-        previous_password: str = Form(...),
-        email: str = Form(...),  # обязательно
-        password: str = Form(None),
-        phone: str = Form(None),
-        description: str = Form(None),
-        main_tag: str = Form(None),
-        additional_tags: str = Form(None),  # например строка с разделителем запятых
-        name: str = Form(None),
-        age: int = Form(None),
-        company_name: str = Form(None),
-        avatar: UploadFile | None = File(None),
-        db_sess: Session = Depends(get_db)
-):
-    auth_header = request.headers.get("Authorization")
-    if not auth_header:
-        raise HTTPException(status_code=401, detail="Authorization header missing")
-
-    user_id = get_user_id_from_token_header(auth_header)
-
-    db_user = db_sess.query(Users).filter(Users.id == user_id).first()
-    if not db_user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    # Проверяем предыдущий пароль
-    if not verify_password(previous_password, db_user.password):
-        raise HTTPException(status_code=400, detail="Incorrect previous password")
-
-    # Обновляем поля
-    db_user.email = email  # email обязателен
-    if password:
-        db_user.password = hashed_password(password)
-    if phone:
-        db_user.phone = phone
-    if description:
-        db_user.description = description
-    if main_tag:
-        db_user.main_tag = main_tag
-    if additional_tags:
-        db_user.additional_tags = [tag.strip() for tag in additional_tags.split(",")]
-
-    if not db_user.is_group:
-        if name:
-            db_user.name = name
-        if age:
-            db_user.age = age
-    else:
-        if company_name:
-            db_user.company_name = company_name
-    if avatar:
-        avatar_url = await save_file_locally(avatar)
-        db_user.avatar_url = avatar_url
-
-    db_sess.commit()
-    db_sess.refresh(db_user)
-
-    return {
-        "id": db_user.id,
-        "email": db_user.email,
-        "phone": db_user.phone,
-        "is_group": db_user.is_group,
-        "description": db_user.description,
-        "main_tag": db_user.main_tag,
-        "additional_tags": db_user.additional_tags,
-        "avatar_url": db_user.avatar_url,
-        "company_name": db_user.company_name if db_user.is_group else None,
-        "name": db_user.name if not db_user.is_group else None,
-        "age": db_user.age if not db_user.is_group else None
-    }
 
 
 @app.get("/group-subscribers/{group_id}")
@@ -459,7 +426,6 @@ def group_subscribers(group_id: str, db_sess: Session = Depends(get_db)):
         })
 
     return result
-
 
 
 @app.get("/my-subscriptions")
@@ -562,6 +528,8 @@ async def create_post(
         raise HTTPException(status_code=401, detail="No token provided")
 
     user = db_sess.query(Users).filter(Users.id == user_id).first()
+    user.posts_count += 1
+
 
     # 2️⃣ Создаём пост
     post_id = str(uuid4())
