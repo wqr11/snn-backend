@@ -272,7 +272,7 @@ async def refresh_token(request: Request, response: Response):
     response.headers["access_token"] = new_access_token
     response.headers["refresh_token"] = new_refresh_token
 
-    return {"access_token": new_access_token, "refresh_token": refresh_token, "token_type": "bearer"}
+    return {"access_token": new_access_token, "refresh_token": new_refresh_token, "token_type": "bearer"}
 
 
 @app.middleware("http")
@@ -311,6 +311,7 @@ async def add_cors_headers(request: Request, call_next):
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
     response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
     return response
+
 
 @app.get("/about_user/{id}")
 def about_me(id: str, request: Request, db_sess: Session = Depends(get_db)):
@@ -519,7 +520,7 @@ async def create_post(
         request: Request,
         title: str = Form(...),
         content: str = Form(...),
-        file: UploadFile = File(None),
+        file: UploadFile | None = File(None),
         db_sess: Session = Depends(get_db)
 ):
     # 1️⃣ Проверка авторизации через middleware (теперь поддерживает и header, и cookie)
@@ -529,7 +530,6 @@ async def create_post(
 
     user = db_sess.query(Users).filter(Users.id == user_id).first()
     user.posts_count += 1
-
 
     # 2️⃣ Создаём пост
     post_id = str(uuid4())
@@ -638,47 +638,53 @@ def get_posts(
     }
 
 
-from sqlalchemy import or_, func
-
 
 @app.get("/search/users")
 def search_users(
-        tag: str = Query(..., min_length=1, description="Search tag"),
+        tag: Optional[str] = Query(None, min_length=1, description="Поиск по тегу"),
+        is_group: Optional[bool] = Query(None, description="True — только группы, False — только пользователи"),
         offset: int = Query(0, ge=0),
         limit: int = Query(20, le=50),
         db_sess: Session = Depends(get_db)
 ):
-    """
-    Поиск пользователей по main_tag и additional_tags.
-    """
-    query = db_sess.query(Users).filter(
-        or_(
-            Users.main_tag.ilike(f"%{tag}%"),
-            func.array_to_string(Users.additional_tags, ',').ilike(f"%{tag}%")
-        )
-    ).order_by(Users.is_group.desc())
+    query = db_sess.query(Users)
 
+    # Фильтр по is_group, если указан
+    if is_group is not None:
+        query = query.filter(Users.is_group == is_group)
+
+    # Фильтр по тегу, если указан
+    if tag:
+        tag_pattern = f"%{tag.lower()}%"
+        query = query.filter(
+            or_(
+                Users.main_tag.ilike(tag_pattern),
+                Users.additional_tags.any(tag.lower())  # для Postgres массивов
+            )
+        )
+
+    # Пагинация
     users = query.offset(offset).limit(limit).all()
 
-    result = []
-    for user in users:
-        result.append({
-            "id": user.id,
-            "email": user.email,
-            "is_group": user.is_group,
-            "description": user.description,
-            "main_tag": user.main_tag,
-            "additional_tags": user.additional_tags,
-            "avatar_url": user.avatar_url,
-            "company_name": user.company_name if user.is_group else None,
-            "name": user.name if not user.is_group else None,
-            "age": user.age if not user.is_group else None
-        })
+    results = [{
+        "id": user.id,
+        "email": user.email,
+        "is_group": user.is_group,
+        "description": user.description,
+        "main_tag": user.main_tag,
+        "additional_tags": user.additional_tags,
+        "avatar_url": user.avatar_url,
+        "company_name": user.company_name if user.is_group else None,
+        "name": user.name if not user.is_group else None,
+        "age": user.age if not user.is_group else None
+    } for user in users]
+
+    has_more = len(users) == limit
 
     return {
-        "users": result,
-        "next_offset": offset + len(result),
-        "has_more": len(users) == limit
+        "users": results,
+        "next_offset": offset + len(users),
+        "has_more": has_more
     }
 
 
