@@ -520,7 +520,7 @@ async def create_post(
         request: Request,
         title: str = Form(...),
         content: str = Form(...),
-        file: UploadFile = File(None),
+        file: UploadFile | None = File(None),
         db_sess: Session = Depends(get_db)
 ):
     # 1️⃣ Проверка авторизации через middleware
