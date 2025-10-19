@@ -539,8 +539,6 @@ async def create_post(
         raise HTTPException(status_code=401, detail="No token provided")
 
     user = db_sess.query(Users).filter(Users.id == user_id).first()
-    if not user.is_group:
-        raise HTTPException(status_code=400, detail="User is not a group")
 
     # 2️⃣ Создаём пост
     post_id = str(uuid4())
