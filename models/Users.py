@@ -16,6 +16,7 @@ class Users(SqlAlchemyBase):
     description = Column(String, nullable=True)
     main_tag = Column(String, nullable=False)
     additional_tags = Column(ARRAY(String), default=[])
+    posts_count = Column(Integer, default=0)
 
     # Только для групп
     company_name = Column(String, nullable=True)
