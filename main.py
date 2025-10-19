@@ -643,20 +643,32 @@ from sqlalchemy import or_, func
 
 @app.get("/search/users")
 def search_users(
-        tag: str = Query(..., min_length=1, description="Search tag"),
+        tag: Optional[str] = Query(None, min_length=1, description="Search tag"),
+        is_group: Optional[bool] = Query(None, description="Filter only groups if True"),
         offset: int = Query(0, ge=0),
         limit: int = Query(20, le=50),
         db_sess: Session = Depends(get_db)
 ):
     """
-    Поиск пользователей по main_tag и additional_tags.
+    Поиск пользователей по main_tag и additional_tags, с опциональной фильтрацией по is_group.
     """
-    query = db_sess.query(Users).filter(
-        or_(
-            Users.main_tag.ilike(f"%{tag}%"),
-            func.array_to_string(Users.additional_tags, ',').ilike(f"%{tag}%")
+    query = db_sess.query(Users)
+
+    # Фильтр по тегу, если указан
+    if tag:
+        query = query.filter(
+            or_(
+                Users.main_tag.ilike(f"%{tag}%"),
+                func.array_to_string(Users.additional_tags, ',').ilike(f"%{tag}%")
+            )
         )
-    ).order_by(Users.is_group.desc())
+
+    # Фильтр по типу (группа или нет), если указан
+    if is_group is not None:
+        query = query.filter(Users.is_group == is_group)
+
+    # Сортировка (группы наверху)
+    query = query.order_by(Users.is_group.desc())
 
     users = query.offset(offset).limit(limit).all()
 
