@@ -1,5 +1,6 @@
 from sys import api_version
-
+from dotenv import load_dotenv
+import os
 from BaseModel.UserUpdateBase import UsersUpdateBase
 from models.PostLike import PostLike
 from models.db_session import global_init
@@ -57,23 +58,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 global_init()
-SECRET_KEY = "supersecretkey"  # ⚠️ вынеси в .env
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
-REFRESH_TOKEN_EXPIRE_DAYS = 7
+SECRET_KEY = os.getenv("SECRET_KEY")
+ALGORITHM = os.getenv("ALGORITHM", "HS256")
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 30))
+REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", 7))
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+NGINX_SERVER = os.getenv("NGINX_SERVER")
+AUTH_TOKEN = os.getenv("AUTH_TOKEN")
+
+UPLOAD_DIR = Path("/var/www/static-files")
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/login")
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 redis_client = aioredis.Redis(host="localhost", port=6379, decode_responses=True)
-# Your nginx server configuration
-NGINX_SERVER = "http://your-domain.com"  # Change to your nginx server URL
-AUTH_TOKEN = "abcdef123456"  # Same token as in nginx config
-
-UPLOAD_DIR = Path("/var/www/static-files")
-AUTH_TOKEN = "abcdef123456"
 
 
 async def save_refresh_token(user_id: str, token: str):
-    """Сохраняем refresh-токен в Redis с TTL"""
     await redis_client.setex(
         f"refresh:{user_id}", REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600, token
     )
@@ -655,7 +656,6 @@ def get_posts(
         "next_offset": offset + len(result),
         "has_more": len(posts) == limit  # 👈 фронт может использовать это для проверки
     }
-
 
 
 @app.get("/search/users")
