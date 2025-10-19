@@ -7,10 +7,9 @@ class Subscription(SqlAlchemyBase):
     __tablename__ = "subscriptions"
 
     id = Column(String, primary_key=True)
-    user_id = Column(String, ForeignKey("users.id"))  # кто подписался
-    group_id = Column(String, ForeignKey("users.id"))  # на какую группу подписались
+    user_id = Column(String, ForeignKey("users.id"))
+    group_id = Column(String, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    # связи
     user = relationship("Users", foreign_keys=[user_id])
     group = relationship("Users", foreign_keys=[group_id])
