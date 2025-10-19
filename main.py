@@ -216,7 +216,7 @@ async def login_user(user: UserLogin, response: Response, db_sess: Session = Dep
     response.headers["access_token"] = access_token
     response.headers["refresh_token"] = refresh_token
 
-    return {"detail": "Login successful"}
+    return {"access_token": access_token, "refresh_token": refresh_token , "token_type": "bearer"}
 
 
 @app.post("/refresh")
@@ -252,7 +252,7 @@ async def refresh_token(request: Request, response: Response):
     response.headers["access_token"] = new_access_token
     response.headers["refresh_token"] = new_refresh_token
 
-    return {"detail": "Tokens refreshed"}
+    return {"access_token": access_token, "refresh_token": refresh_token , "token_type": "bearer"}
 
 
 @app.middleware("http")
