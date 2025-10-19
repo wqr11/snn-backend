@@ -27,44 +27,48 @@ Backend для мобильного приложения "Я.Проф" - про�
 ├── main.py                 # Точка входа приложения
 ├── models/                 # Модели базы данных
 │   ├── db_session.py       # Сессии БД
-│   ├── Users.py           # Модель пользователей
-│   ├── Posts.py           # Модель постов
-│   ├── attachments.py     # Модель вложений
-│   ├── subscriptions.py   # Модель подписок
-│   └── PostLike.py        # Модель лайков
+│   └── ...       
 ├── BaseModel/             # Pydantic схемы
-│   ├── UsersBase.py       # Базовая схема пользователя
-│   ├── UserLoginBase.py   # Схема логина
-│   ├── UserUpdateBase.py  # Схема обновления
-│   ├── PostBase.py        # Схема постов
-│   └── ResponseUserBase.py # Схема ответа
+│   └── ...
 └── .env                   # Переменные окружения
 ```
 
 ## ⚙️ Установка и запуск
 
 ### Предварительные требования
-- Python 3.8+
+- Python 3.11
 - PostgreSQL
 - Redis
 
 ### Установка зависимостей
 ```bash
-pip install fastapi uvicorn sqlalchemy argon2-cffi python-jose redis python-dotenv
+pip install -r requirements.txt
+```
+
+### Запуск сервисов
+```bash
+docker compose up -d
 ```
 
 ### Настройка окружения
 Создайте файл `.env`:
 ```env
-SECRET_KEY=your-secret-key
+REDIS_PASSWORD=123
+REDIS_PORT=6379
+REDIS_DB=1
+REDIS_HOST=127.0.0.1
+REDIS_TLS=true
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=123
+POSTGRES_DB=stage
+POSTGRES_URL=postgresql://127.0.0.1:5432/stage?user=postgres&password=123
+SECRET_KEY=supersecretkey
 ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=30
 REFRESH_TOKEN_EXPIRE_DAYS=7
 REDIS_HOST=localhost
 REDIS_PORT=6379
-NGINX_SERVER=your-nginx-server
-AUTH_TOKEN=your-auth-token
-DATABASE_URL=postgresql://user:password@localhost/yaprof
+AUTH_TOKEN=abcdef123456
 ```
 
 ### Запуск приложения
