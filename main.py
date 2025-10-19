@@ -126,7 +126,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 
-PUBLIC_DIR = Path("public")
+PUBLIC_DIR = Path("/var/www/public")
 PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -137,7 +137,7 @@ async def save_file_locally(file: UploadFile) -> str:
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    return f"/var/www/public/{filename}"
+    return filename
 
 
 @app.post("/register")
